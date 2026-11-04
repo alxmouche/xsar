@@ -10,6 +10,8 @@ __all__ = [
     "RcmDataset",
     "BiomassMeta",
     "BiomassDataset",
+    "NisarMeta",
+    "NisarDataset",
     "BaseDataset",
     "BaseMeta",
     "get_test_file",
@@ -23,6 +25,8 @@ from xsar.radarsat2_meta import RadarSat2Meta
 from xsar.rcm_dataset import RcmDataset
 from xsar.biomass_meta import BiomassMeta
 from xsar.biomass_dataset import BiomassDataset
+from xsar.nisar_meta import NisarMeta
+from xsar.nisar_dataset import NisarDataset
 from xsar.base_dataset import BaseDataset
 from xsar.base_meta import BaseMeta
 from xsar.xsar import open_dataset,open_datatree,product_info

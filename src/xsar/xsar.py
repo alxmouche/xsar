@@ -24,6 +24,8 @@ from .rcm_meta import RcmMeta
 from .rcm_dataset import RcmDataset
 from .biomass_meta import BiomassMeta
 from .biomass_dataset import BiomassDataset
+from .nisar_meta import NisarMeta
+from .nisar_dataset import NisarDataset
 
 logger = logging.getLogger("xsar")
 logger.addHandler(logging.NullHandler())
@@ -53,6 +55,7 @@ def open_dataset(*args, **kwargs):
     >>> xsar.RadarSat2Dataset(*args, **kwargs).dataset
     >>> xsar.RcmDataset(*args, **kwargs).dataset
     >>> xsar.BiomassDataset(*args, **kwargs).dataset
+    >>> xsar.NisarDataset(*args, **kwargs).dataset
 
     See Also
     --------
@@ -62,11 +65,16 @@ def open_dataset(*args, **kwargs):
     xsar.BiomassDataset
     """
     dataset_id = args[0]
+    if isinstance(dataset_id, os.PathLike):
+        dataset_id = os.fspath(dataset_id)
+        args = (dataset_id, *args[1:])
     # Detect product type from Meta object or path string, then call specific reader.
     # BIOMASS is checked first because its paths may contain substrings
     # (like "S1") that would match other branches when checking the full path.
     if isinstance(dataset_id, BiomassMeta):
         sar_obj = BiomassDataset(*args, **kwargs)
+    elif isinstance(dataset_id, NisarMeta):
+        sar_obj = NisarDataset(*args, **kwargs)
     elif isinstance(dataset_id, Sentinel1Meta):
         sar_obj = Sentinel1Dataset(*args, **kwargs)
     elif isinstance(dataset_id, RadarSat2Meta):
@@ -78,6 +86,8 @@ def open_dataset(*args, **kwargs):
         basename_upper = basename.upper()
         if "BIO" in basename_upper: # warning BIOMASS product also contain the S1 string
             sar_obj = BiomassDataset(*args, **kwargs)
+        elif dataset_id.startswith("NISAR_DS:") or basename_upper.startswith("NISAR_"):
+            sar_obj = NisarDataset(*args, **kwargs)
         elif "S1" in dataset_id:
             sar_obj = Sentinel1Dataset(*args, **kwargs)
         elif "RS2" in dataset_id:
@@ -120,9 +130,14 @@ def open_datatree(*args, **kwargs):
     xsar.RcmDataset
     """
     dataset_id = args[0]
+    if isinstance(dataset_id, os.PathLike):
+        dataset_id = os.fspath(dataset_id)
+        args = (dataset_id, *args[1:])
     # Detect product type from Meta object or path string, then call specific reader.
     if isinstance(dataset_id, BiomassMeta):
         sar_obj = BiomassDataset(*args, **kwargs)
+    elif isinstance(dataset_id, NisarMeta):
+        sar_obj = NisarDataset(*args, **kwargs)
     elif isinstance(dataset_id, Sentinel1Meta):
         sar_obj = Sentinel1Dataset(*args, **kwargs)
     elif isinstance(dataset_id, RadarSat2Meta):
@@ -134,6 +149,8 @@ def open_datatree(*args, **kwargs):
         basename_upper = basename.upper()
         if "BIO" in basename_upper:
             sar_obj = BiomassDataset(*args, **kwargs)
+        elif dataset_id.startswith("NISAR_DS:") or basename_upper.startswith("NISAR_"):
+            sar_obj = NisarDataset(*args, **kwargs)
         elif "S1" in dataset_id:
             sar_obj = Sentinel1Dataset(*args, **kwargs)
         elif "RS2" in dataset_id:

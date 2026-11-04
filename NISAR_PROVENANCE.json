@@ -1,0 +1,8 @@
+{
+  "archive": "/scale/user/qfebvre/projects/2507_galeio/xsar_nisar.zip",
+  "sha256": "5daddfd2e0d8ff600a993839ea7a40803cabfc5b281955bbcaa509c30140321e",
+  "imported_on": "2026-11-04",
+  "git_history_in_archive": false,
+  "base_commit": "d1b1571",
+  "upstream_merge_status": "Not fetched: network blocked. Current upstream main has NOT been integrated."
+}

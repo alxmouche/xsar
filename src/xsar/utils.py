@@ -270,8 +270,13 @@ def map_blocks_coords(da, func, func_kwargs={}, **kwargs):
         return result
 
     coords = {c: da[c].values for c in da.dims}
-    if "name" not in kwargs:
-        kwargs["name"] = dask.utils.funcname(func)
+    # dask >= 2025 uses `name` verbatim as the output key: it must be unique, or two
+    # arrays built with the same function name (e.g. longitude and latitude, both from a
+    # RectBivariateSpline) would silently share the same graph keys.
+    kwargs["name"] = "%s-%s" % (
+        kwargs.get("name", dask.utils.funcname(func)),
+        dask.base.tokenize(func, func_kwargs, da.data, coords),
+    )
 
     meta = da.data
     dtype = meta.dtype

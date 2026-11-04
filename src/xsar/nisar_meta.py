@@ -108,9 +108,12 @@ class NisarMeta(BaseMeta):
 
         self._geoloc = self.reader.geoloc.copy()
         self._geoloc.attrs = {}
+        self._geoloc["longitude"] = self._continuous_longitude(self._geoloc.longitude)
 
         lines, samples = zip(*self._image_corners)
         lon, lat = self.coords2ll(np.array(lines, float), np.array(samples, float))
+        if self.cross_antimeridian:
+            lon = lon % 360
         corners = list(zip(lon, lat))
         self._geoloc.attrs["footprint"] = Polygon(corners)
 
@@ -214,12 +217,6 @@ class NisarMeta(BaseMeta):
         if scalar:
             return float(line[0]), float(sample[0])
         return line, sample
-
-    @property
-    def cross_antimeridian(self):
-        """True if footprint cross antimeridian"""
-        lon = self.reader.geoloc["longitude"]
-        return bool((lon.max() - lon.min()) > 180)
 
     @property
     def approx_transform(self):

@@ -129,8 +129,13 @@ class BaseDataset(ABC):
     def geometry(self):
         """
         geometry of this dataset, as a `shapely.geometry.Polygon` (lon/lat coordinates)
+
+        If `self.sar_meta.cross_antimeridian` is True, longitudes are in the continuous [0, 360] range.
         """
-        return Polygon(zip(*self._bbox_ll))
+        lon, lat = self._bbox_ll
+        if self.sar_meta.cross_antimeridian:
+            lon = np.asarray(lon) % 360
+        return Polygon(zip(lon, lat))
 
     def load_ground_heading(self, approx=True):
         """
@@ -354,6 +359,9 @@ class BaseDataset(ABC):
                 #         print('lat',lat)
                 # else:
                 lon, lat = self.sar_meta.coords2ll(line, sample)
+                if self.sar_meta.cross_antimeridian:
+                    # continuous longitudes, as the footprint (no jump from 180 to -180 between gcps)
+                    lon = lon % 360
                 gcp = GroundControlPoint(x=lon, y=lat, z=0, col=icol, row=irow)
                 local_gcps.append(gcp)
                 cpt += 1
@@ -565,17 +573,22 @@ class BaseDataset(ABC):
             # transform * (x, y) -> (line, sample)
             # (where (x, y) are index in out_shape)
             # Affine.permutation() is used because (line, sample) is transposed from geographic
+            # coords label the pixel centers, while rasterio expects the transform
+            # to map pixel indices to the grid corner -> shift by half a step
+            dline = (line[-1] - line[0]) / (len(line) - 1)
+            dsample = (sample[-1] - sample[0]) / (len(sample) - 1)
 
             transform = (
-                Affine.translation(*chunk_coords[0])
-                * Affine.scale(*[np.unique(np.diff(c))[0] for c in [line, sample]])
+                Affine.translation(line[0] - dline / 2,
+                                   sample[0] - dsample / 2)
+                * Affine.scale(dline, dsample)
                 * Affine.permutation()
             )
 
             raster_mask = rasterio.features.rasterize(
                 [vector_mask_coords],
                 out_shape=out_shape,
-                all_touched=False,
+                all_touched=True,
                 transform=transform,
             )
             return raster_mask
@@ -744,9 +757,15 @@ class BaseDataset(ABC):
             # (where (x, y) are index in out_shape)
             # Affine.permutation() is used because (line, sample) is transposed from geographic
             # this transform Affine seems to be sufficient approx for SLC -> curvilinear could be even better?
+            # coords label the pixel centers, while rasterio expects the transform
+            # to map pixel indices to the grid corner -> shift by half a step
+            dline = (line[-1] - line[0]) / (len(line) - 1)
+            dsample = (sample[-1] - sample[0]) / (len(sample) - 1)
+
             transform = (
-                Affine.translation(*chunk_coords[0])
-                * Affine.scale(*[np.unique(np.diff(c))[0] for c in [line, sample]])
+                Affine.translation(line[0] - dline / 2,
+                                   sample[0] - dsample / 2)
+                * Affine.scale(dline, dsample)
                 * Affine.permutation()
             )
 

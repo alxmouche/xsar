@@ -106,3 +106,26 @@ def test_antimeridian_longitude_interpolation(product):
     longitude = obj.dataset.longitude.isel(line=2).compute().values
     expected = (179.9 + np.arange(10) * .05 + 180) % 360 - 180
     np.testing.assert_allclose(longitude, expected, atol=5e-5)
+    assert obj.sar_meta.cross_antimeridian is True
+    assert obj.sar_meta.footprint.bounds[2] - obj.sar_meta.footprint.bounds[0] < 1
+    line, sample = obj.sar_meta.ll2coords(-179.9, 10.02)
+    np.testing.assert_allclose([line, sample], [2., 4.], atol=1e-3)
+
+
+def test_nisar_mask_across_antimeridian(product):
+    from shapely.geometry import box
+    from xsar.base_meta import _ShapefileFeature
+
+    with h5py.File(product, "r+") as f:
+        geo = f["science/LSAR/RSLC/metadata/geolocationGrid"]
+        samples = (geo["slantRange"][()] - 800000) / 10
+        longitude = (179.9 + samples * .05 + 180) % 360 - 180
+        geo["coordinateX"][...] = np.broadcast_to(longitude, geo["coordinateX"].shape)
+    meta = xsar.NisarMeta(product)
+    meta.set_mask_feature("test_island", _ShapefileFeature([
+        box(179.95, 10.01, 180., 10.04), box(-180., 10.01, -179.95, 10.04)
+    ]))
+    mask = meta.get_mask("test_island")
+    assert mask.is_valid
+    assert mask.area == pytest.approx(.1 * .03)
+    assert mask.bounds == pytest.approx((179.95, 10.01, 180.05, 10.04))

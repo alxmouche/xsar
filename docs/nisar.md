@@ -35,7 +35,10 @@ the optional reader import occurs when constructing `NisarMeta`.
 Tests with small generated HDF5 products are in `test/test_nisar.py`. The real
 product tests live in the companion reader and use `NISAR_TEST_RSLC`.
 
-This branch was prepared from local commit `d1b1571` plus the preserved dirty
-BIOMASS change. Current upstream `umr-lops/xsar/main` has not yet been fetched or
-merged because network access was unavailable during preparation. See
-`NISAR_PROVENANCE.json`; do not treat this branch as synchronized with upstream.
+This branch preserves local commit `d1b1571` and the additional BIOMASS change,
+then integrates upstream `umr-lops/xsar/main` at
+`ae3149e4c6850a927017360b091c941cac4a80b6`. NISAR geolocation, footprints and affine
+transforms follow upstream's continuous-longitude convention across the
+antimeridian. Upstream no longer configures a default Cartopy land mask: set a
+land-mask source explicitly or skip `land_mask` as shown above. The configured
+OSM/shapefile path must be readable by the runtime.

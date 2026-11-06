@@ -461,7 +461,25 @@ class BiomassDataset(BaseDataset):
                 "comment": "denoised and clipped to 0",
                 "history": "BIOMASS σ⁰_denoised = max(σ⁰ - σ⁰_noise, 0)",
             }
-            self._dataset["sigma0"] = sigma0_denoised
+            sigma0_source = os.environ.get(
+                "XSAR_BIOMASS_SIGMA0_SOURCE", "denoised"
+            ).strip().lower()
+            if sigma0_source == "denoised":
+                self._dataset["sigma0"] = sigma0_denoised
+            elif sigma0_source == "raw":
+                sigma0_raw_out = self._dataset["sigma0_raw"].copy()
+                sigma0_raw_out.attrs = {
+                    "units": "linear",
+                    "comment": "calibrated without noise subtraction",
+                    "history": "BIOMASS sigma0 = sigma0_raw (NESZ not subtracted)",
+                }
+                self._dataset["sigma0"] = sigma0_raw_out
+            else:
+                raise ValueError(
+                    "XSAR_BIOMASS_SIGMA0_SOURCE must be 'denoised' or 'raw', "
+                    f"got {sigma0_source!r}"
+                )
+            self._dataset.attrs["sigma0_source"] = sigma0_source
 
             # Store NESZ
             nesz = xr.concat(nesz_list, dim="pol").assign_coords(pol=pols)

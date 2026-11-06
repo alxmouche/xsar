@@ -38,7 +38,6 @@ dependencies = [
   "xarray>=2024.10.0",
   'affine',
   'rasterio',
-  'cartopy',
   'fiona',
   'pyproj',
   'numpy',
@@ -57,6 +56,7 @@ dependencies = [
 RS2 = ["xradarsat2"]
 RCM = ["xarray-safe-rcm"]
 S1 = ["xarray-safe-s1"]
+NISAR = ["xarray-nisar>=0.1.0"]
 # BIOMASS = ["xarray-biomass"]  # to be uncommented once the reader is publicly available on pypi
 
 

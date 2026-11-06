@@ -2,7 +2,6 @@ import copy
 import logging
 import warnings
 
-import cartopy
 import rasterio
 import shapely
 from shapely.geometry import Polygon
@@ -16,7 +15,14 @@ from .raster_readers import available_rasters
 from .base_dataset import BaseDataset
 import geopandas as gpd
 
-from .utils import class_or_instancemethod, to_lon180, haversine
+from .utils import (
+    class_or_instancemethod,
+    to_lon180,
+    geometry_to_lon180,
+    geometry_to_lon360,
+    haversine,
+    config,
+)
 
 logger = logging.getLogger("xsar.base_meta")
 logger.addHandler(logging.NullHandler())
@@ -30,6 +36,20 @@ warnings.filterwarnings(
 np.errstate(invalid="ignore")
 
 
+# Default 'land' mask: shapefile path from the 'land_mask' key of the config.
+_DEFAULT_LAND = config.get("land_mask")
+
+
+class _ShapefileFeature:
+    """Minimal feature exposing ``.geometries()``, built from shapefile geometries (OSM, GSHHG...)."""
+
+    def __init__(self, geometries):
+        self._geometries = list(geometries)
+
+    def geometries(self):
+        return iter(self._geometries)
+
+
 class BaseMeta(BaseDataset):
     """
     Abstract class that defines necessary common functions for the computation of different SAR metadata
@@ -39,13 +59,14 @@ class BaseMeta(BaseDataset):
 
     # default mask feature (see self.set_mask_feature and cls.set_mask_feature)
     _mask_features_raw = {
-        "land": cartopy.feature.NaturalEarthFeature("physical", "land", "10m")
+        "land": _DEFAULT_LAND
     }
 
     _mask_features = {}
     _mask_intersecting_geometries = {}
     _mask_geometry = {}
     _geoloc = None
+    _cross_antimeridian = None
     _rasterized_masks = None
     manifest_attrs = None
     _time_range = None
@@ -64,11 +85,16 @@ class BaseMeta(BaseDataset):
         self.rasters = available_rasters.iloc[0:0].copy()
 
     def _get_mask_feature(self, name):
-        # internal method that returns a cartopy feature from a mask name
+        # internal method that returns a feature (with a .geometries() method) from a mask name
         if self._mask_features[name] is None:
             feature = self._mask_features_raw[name]
+            if feature is None:
+                raise ValueError(
+                    f"No feature set for mask '{name}'. Set 'land_mask' in "
+                    f"~/.xsar/config.yml, or call set_mask_feature('{name}', '/path/to.shp')."
+                )
             if isinstance(feature, str):
-                # feature is a shapefile.
+                # feature is a shapefile (e.g. OSM land-polygons, GSHHG).
                 # we get the crs from the shapefile to be able to transform the footprint to this crs_in
                 # (so we can use `mask=` in gpd.read_file)
                 import fiona
@@ -86,19 +112,23 @@ class BaseMeta(BaseDataset):
                 proj_transform = pyproj.Transformer.from_crs(
                     pyproj.CRS("EPSG:4326"), crs_in, always_xy=True
                 ).transform
-                footprint_crs = transform(proj_transform, self.footprint)
+                # the shapefile is in [-180, 180]: a footprint crossing the antimeridian
+                # (continuous [0, 360] longitudes) is split in two parts
+                footprint_crs = transform(proj_transform, geometry_to_lon180(self.footprint))
 
                 with warnings.catch_warnings():
                     # ignore "RuntimeWarning: Sequential read of iterator was interrupted. Resetting iterator."
                     warnings.simplefilter("ignore", RuntimeWarning)
-                    feature = cartopy.feature.ShapelyFeature(
+                    # wrap the shapefile geometries in a minimal feature exposing .geometries()
+                    feature = _ShapefileFeature(
                         gpd.read_file(feature, mask=footprint_crs)
                         .to_crs(epsg=4326)
-                        .geometry,
-                        cartopy.crs.PlateCarree(),
+                        .geometry
                     )
-            if not isinstance(feature, cartopy.feature.Feature):
-                raise TypeError("Expected a cartopy.feature.Feature type")
+            if not hasattr(feature, "geometries"):
+                raise TypeError(
+                    "Expected a feature with a .geometries() method "
+                    "(a shapefile path, or any feature exposing .geometries())")
             self._mask_features[name] = feature
 
         return self._mask_features[name]
@@ -106,33 +136,34 @@ class BaseMeta(BaseDataset):
     @class_or_instancemethod
     def set_mask_feature(self_or_cls, name, feature):
         """
-        Set a named mask from a shapefile or a cartopy feature.
+        Set a named mask from a shapefile path.
 
         Parameters
         ----------
         name: str
             mask name
-        feature: str or cartopy.feature.Feature
-            if str, feature is a path to a shapefile or whatever file readable with fiona.
-            It is recommended to use str, as the serialization of cartopy feature might be big.
+        feature: str
+            path to a shapefile (or any file readable with fiona).
+            Any object exposing a ``.geometries()`` method is also accepted.
 
         Examples
         --------
-            Add an 'ocean' mask at class level (ie as default mask):
+            Override the default 'land' mask with your own shapefile, at class level
+            (ie as default mask for every new meta):
             ```
-            >>> xsar.RadarSat2Meta.set_mask_feature("ocean", cartopy.feature.OCEAN)
-            >>> xsar.Sentinel1Meta.set_mask_feature("ocean", cartopy.feature.OCEAN)
-            ```
-
-            Add an 'ocean' mask at instance level (ie only for this self Sentinel1Meta (or RadarSat2Meta instance):
-            ```
-            >>> xsar.RadarSat2Meta.set_mask_feature("ocean", cartopy.feature.OCEAN)
-            >>> xsar.Sentinel1Meta.set_mask_feature("ocean", cartopy.feature.OCEAN)
+            >>> xsar.RadarSat2Meta.set_mask_feature("land", "/path/to/land_polygons.shp")
+            >>> xsar.Sentinel1Meta.set_mask_feature("land", "/path/to/land_polygons.shp")
             ```
 
+            Add an extra named mask at instance level (only for this meta instance):
+            ```
+            >>> meta.set_mask_feature("gshhg", "/path/to/GSHHS_h_L1.shp")
+            ```
 
-            High resoltion shapefiles can be found from openstreetmap.
+
+            High resolution land shapefiles can be found from openstreetmap.
             It is recommended to use WGS84 with large polygons split from https://osmdata.openstreetmap.de/
+            The default 'land' mask is read from the 'land_mask' key of ~/.xsar/config.yml.
 
         See Also
         --------
@@ -164,19 +195,26 @@ class BaseMeta(BaseDataset):
 
         """
         if describe:
-            descr = self._mask_features_raw[name]
-            try:
-                # nice repr for a class (like 'cartopy.feature.NaturalEarthFeature land')
-                descr = "%s.%s %s" % (
-                    descr.__module__,
-                    descr.__class__.__name__,
-                    descr.name,
-                )
-            except AttributeError:
-                # Fallback for features without a name attribute
-                descr = "%s.%s" % (descr.__module__, descr.__class__.__name__)
-            return descr
+            descr = self._mask_features_raw.get(name)
 
+            # 1) if descr is a str (shapefile path, e.g. OSM land-polygons / GSHHG):
+            #    describe the mask by its source path -> ends up in the mask 'history' attr
+            if isinstance(descr, str):
+                return descr
+
+            # 2) if descr is None
+            if descr is None:
+                return f"Unknown mask feature: {name}"
+
+            # 3) otherwise a feature object: nice repr like 'module.Class name'
+            module = getattr(descr, "__module__", "unknown_module")
+            cls = descr.__class__.__name__
+            feat_name = getattr(descr, "name",  f"{module}.{cls}")
+            return "%s.%s %s" % (
+                    module,
+                    cls,
+                    feat_name,
+            )
         if self._mask_geometry[name] is None:
             intersecting_geoms = self._get_mask_intersecting_geometries(name)
 
@@ -201,7 +239,12 @@ class BaseMeta(BaseDataset):
                 union_geom = make_valid(union_geom)
 
             if union_geom and not union_geom.is_empty:
-                poly = union_geom.intersection(self.footprint)
+                footprint = self.footprint
+                if footprint.bounds[2] > 180:
+                    # footprint crossing the antimeridian: it is in the continuous
+                    # [0, 360] longitude range, so the mask is expressed in the same range
+                    union_geom = geometry_to_lon360(union_geom)
+                poly = union_geom.intersection(footprint)
             else:
                 poly = Polygon()
 
@@ -232,13 +275,41 @@ class BaseMeta(BaseDataset):
     def footprint(self):
         pass
 
+    def _continuous_longitude(self, longitude):
+        """
+        Set `self.cross_antimeridian` from the longitudes of the geolocation grid, as given
+        by the product ([-180, 180]), and return them in a continuous range.
+
+        This has to be done once, when the geolocation grid is read: everything derived from
+        this grid (footprint, approx_transform, interpolators) needs continuous longitudes.
+
+        Parameters
+        ----------
+        longitude: xarray.DataArray or numpy.ndarray
+            longitudes of the geolocation grid, in [-180, 180] range
+
+        Returns
+        -------
+        xarray.DataArray or numpy.ndarray
+            longitudes in [0, 360] range if the footprint cross antimeridian, unchanged otherwise.
+        """
+        self._cross_antimeridian = ((np.max(longitude) - np.min(longitude)) > 180).item()
+        if self._cross_antimeridian:
+            attrs = getattr(longitude, "attrs", {})
+            longitude = longitude % 360
+            if attrs:
+                longitude.attrs.update(attrs)
+        return longitude
+
     @property
     def cross_antimeridian(self):
         """True if footprint cross antimeridian"""
-        return (
-            (np.max(self.geoloc["longitude"]) -
-             np.min(self.geoloc["longitude"])) > 180
-        ).item()
+        if self._cross_antimeridian is None:
+            # reading the geolocation grid sets the flag (see `_continuous_longitude`)
+            geoloc = self.geoloc
+            if self._cross_antimeridian is None:
+                self._continuous_longitude(geoloc["longitude"])
+        return self._cross_antimeridian
 
     @property
     def swath(self):
@@ -283,6 +354,11 @@ class BaseMeta(BaseDataset):
         -------
         tuple of np.array or tuple of float
             (longitude, latitude) , with shape depending on `to_grid` keyword.
+
+        Notes
+        -----
+        longitudes are in [-180, 180] range. For a shapely object, if `self.cross_antimeridian` is True,
+        longitudes are in the continuous [0, 360] range (a geometry can't jump from 180 to -180).
 
         See Also
         --------
@@ -341,7 +417,15 @@ class BaseMeta(BaseDataset):
             (xoff, a, b, yoff, d, e) = self.approx_transform.to_gdal()
             return shapely.affinity.affine_transform(shape, (a, b, d, e, xoff, yoff))
         else:
-            return shapely.ops.transform(self.coords2ll, shape)
+
+            def coords2ll_continuous(lines, samples):
+                lon, lat = self.coords2ll(np.asarray(lines), np.asarray(samples))
+                if self.cross_antimeridian:
+                    # keep the geometry in one piece
+                    lon = lon % 360
+                return lon, lat
+
+            return shapely.ops.transform(coords2ll_continuous, shape)
 
     def ll2coords(self, *args):
         """
@@ -376,17 +460,26 @@ class BaseMeta(BaseDataset):
             return self._ll2coords_shapely(args[0])
 
         lon, lat = args
+        lon = np.asarray(lon)
+        lat = np.asarray(lat)
+
+        cross_antimeridian = self.cross_antimeridian
+        if cross_antimeridian:
+            # define approx transform continuous longitudes
+            lon = lon % 360
 
         # approximation with global inaccurate transform
         line_approx, sample_approx = ~self.approx_transform * (
-            np.asarray(lon),
-            np.asarray(lat),
+            lon,
+            lat
         )
 
         # Theoretical identity. It should be the same, but the difference show the error.
         lon_identity, lat_identity = self.coords2ll(
             line_approx, sample_approx, to_grid=False
         )
+        if cross_antimeridian:
+            lon_identity = lon_identity % 360
         line_identity, sample_identity = ~self.approx_transform * (
             lon_identity,
             lat_identity,

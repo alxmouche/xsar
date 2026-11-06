@@ -1,0 +1,9 @@
+{
+  "archive": "/scale/user/qfebvre/projects/2507_galeio/xsar_nisar.zip",
+  "sha256": "5daddfd2e0d8ff600a993839ea7a40803cabfc5b281955bbcaa509c30140321e",
+  "imported_on": "2026-11-04",
+  "git_history_in_archive": false,
+  "base_commit": "d1b1571",
+  "upstream_merge_status": "Reviewed and merged fetched upstream/main ae3149e4c6850a927017360b091c941cac4a80b6; NISAR adapted to continuous-longitude metadata contract.",
+  "upstream_commit": "ae3149e4c6850a927017360b091c941cac4a80b6"
+}
